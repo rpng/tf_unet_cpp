@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <algorithm>
 #include "unet.h"
 #include <time.h>
 
@@ -129,7 +130,7 @@ UNet::~UNet()
 
 }
 
-void UNet::run(const cv::Mat& _im, cv::Mat& out)
+cv::Rect UNet::run(const cv::Mat& _im, cv::Mat& out)
 {   
     if (input)
     {
@@ -145,14 +146,23 @@ void UNet::run(const cv::Mat& _im, cv::Mat& out)
     cv::Size sz(w, h);
     cv::Mat im;
     cv::resize(_im, im, sz);
-    cv::cvtColor(im, im, cv::COLOR_BGR2RGB);
     im.convertTo(im, CV_32F);
     im /= 255.0;
 
     // Avoid double free with opencv and tf.
     float* data = (float*)malloc(h*w*c*sizeof(float));
     memcpy(data, im.data, h*w*c*sizeof(float));
-
+    /*
+    for (int k = 0; k < c; k++)
+    {
+        for (int i = 0; i < h; i++)
+        {
+            for (int j = 0; j < w; j++)
+                printf("%.3f ", data[k*w*h + i*w + j]);
+            printf("\n");
+        }
+    }
+    */
     input = TF_NewTensor(
         TF_FLOAT, dims,
         4, data, h*w*c*sizeof(float),
@@ -161,7 +171,7 @@ void UNet::run(const cv::Mat& _im, cv::Mat& out)
     if (!input)
     { 
         fprintf(stderr, "Failed to create input tensor\n");
-        return;
+        return cv::Rect(0,0,0,0);
     }
 
     TF_SessionRun(sess,
@@ -178,24 +188,33 @@ void UNet::run(const cv::Mat& _im, cv::Mat& out)
     {
         const char* msg = TF_Message(status);
         fprintf(stderr, "\nSession run error! Status: %s\n\n", msg);
-        return;
+        return cv::Rect(0,0,0,0);
     }
     
-    float* ret_data = (float*)TF_TensorData(output);
+    if (!output)
+    { 
+        fprintf(stderr, "Failed to create output tensor!\n");
+        return cv::Rect(0,0,0,0);
+    }
+    
+    int64_t* ret_data = (int64_t*)TF_TensorData(output);
    
     uint8_t* ret_data_uint8 = (uint8_t*)malloc(w*h*sizeof(uint8_t));
-    for (int i = 0; i < w*h; i++)
-        ret_data_uint8[i] = (uint8_t)ret_data[i];
+    std::copy(ret_data, ret_data + w*h, ret_data_uint8);
     
     /*
     for (int i = 0; i < h; i++)
     {
         for (int j = 0; j < w; j++)
-            printf("%.3f ", ret_data[i*w + j]);
+            printf("%d ", ret_data_uint8[i*w + j]);
         printf("\n");
     }
     */
+
     out = cv::Mat(sz, CV_8UC1, ret_data_uint8);
+    cv::Mat p;
+    cv::findNonZero(out, p);
+    return cv::boundingRect(p);
 }
 
 
