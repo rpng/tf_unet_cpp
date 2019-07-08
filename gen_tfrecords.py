@@ -102,7 +102,6 @@ def generate():
             if k==0:
                 image = upper_crop(image, vw, vh)
                 lab = upper_crop(lab, vw, vh)
-
             mask_label = np.zeros((vh, vw, 2), dtype=np.bool) if k==0 \
                     else np.zeros((480, 640, 2), dtype=np.bool)
             mask_label[:, :, 1:2] = lab==car_id
@@ -145,6 +144,7 @@ def generate():
                     plt.pause(3)
 
                 else:
+
                     features_ = {
                         'img': bytes_feature(tf.compat.as_bytes(image.tostring())),
                         'label': bytes_feature(tf.compat.as_bytes(mask_label.astype(np.uint8).tostring()))

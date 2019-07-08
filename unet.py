@@ -32,8 +32,10 @@ if __name__ == '__main__':
         "is used to override hyperparameter settings when manually "
         "selecting hyperparameters.")
 
-    tf.app.flags.DEFINE_integer("batch_size", 22, "Size of mini-batch.")
-    tf.app.flags.DEFINE_string("input_dir", "tfrecords/", "tfrecords dir")
+    tf.app.flags.DEFINE_integer("batch_size", 20, "Size of mini-batch.")
+    tf.app.flags.DEFINE_boolean("fake_fisheye", False, "If true the data will be warped for"
+                                                       "fake fisheye.")
+    tf.app.flags.DEFINE_string("input_dir", "tfrecords_arl_wheels_bbox/", "tfrecords dir")
     tf.app.flags.DEFINE_string("image", "", "Image to predict on")
 
 def create_input_fn(split, batch_size):
@@ -65,6 +67,8 @@ def create_input_fn(split, batch_size):
             features_ = {}
             features_['img'] = tf.FixedLenFeature([], tf.string)
             features_['label'] = tf.FixedLenFeature([], tf.string)
+            features_['bbox_mask'] = tf.FixedLenFeature([], tf.string)
+            features_['bbox'] = tf.FixedLenFeature([], tf.string)
 
             fs = tf.parse_single_example(
                 serialized_example,
@@ -78,9 +82,12 @@ def create_input_fn(split, batch_size):
             #        tf.float32), [__vh,__vw,N_CLASSES])
             #else:
             fs['img'] = tf.reshape(tf.cast(tf.decode_raw(fs['img'], tf.uint8),
-                    tf.float32) / 255.0, [2*vh,2*vw,3])
+                    tf.float32) / 255.0, [vh,vw,3])
             fs['label'] = tf.reshape(tf.cast(tf.decode_raw(fs['label'], tf.uint8),
-                    tf.float32), [2*vh,2*vw,N_CLASSES])
+                    tf.float32), [vh,vw,N_CLASSES])
+            fs['bbox_mask'] = tf.reshape(tf.cast(tf.decode_raw(fs['bbox_mask'], tf.uint8),
+                    tf.float32), [vh,vw,1])
+            fs['bbox'] = tf.cast(tf.decode_raw(fs['bbox'], tf.int64), tf.float32)
             return fs
 
         #if split=='train':
@@ -113,7 +120,7 @@ def unet(images, is_training=False):
         with slim.arg_scope(
             [slim.conv2d],
             normalizer_fn=None,
-            activation_fn=lambda x: tf.nn.relu(x),
+            activation_fn=lambda x: tf.nn.elu(x),
             padding='SAME'):
             
             ### Encoder ####################################
@@ -155,15 +162,15 @@ def unet(images, is_training=False):
             u12 = slim.conv2d(tf.concat([u11, d12], axis=-1), 32, [3,3])
             u13 = slim.conv2d(u12, 32, [3,3])
 
-            prob_feat = slim.conv2d(u13, 2, [1,1],
+            feat = slim.conv2d(u13, 5, [1,1],
                 normalizer_fn=None,
                 activation_fn=None,
-                padding='SAME')
+                padding='SAME') # [0,1] for segmentation, [2] for bbox center, [3,4] for w, h
             
-            pred = tf.nn.softmax(prob_feat, name='pred')
+            pred = tf.nn.softmax(feat[:,:,:,:2], name='pred')
             mask = tf.argmax(pred, axis=-1, name='mask')
             
-            return prob_feat, mask
+            return feat, mask
 
 def model_fn(features, labels, mode, hparams):
    
@@ -171,30 +178,52 @@ def model_fn(features, labels, mode, hparams):
     
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
     
-    im_l = tf.concat([features['img'], features['label']], axis=-1)
-    x = tf.image.random_flip_left_right(im_l)
+    
+    #x = tf.concat([features['img'], features['label']], axis=-1)
+    # TODO add bbox here and uncomment
     '''
-    if is_training:
+    x = tf.image.random_flip_left_right(x)
+
+    # uncomment for fake fisheye
+
+    if is_training and FLAGS.fake_fisheye:
         x = tf.contrib.image.rotate(x, tf.random.normal([FLAGS.batch_size]))
         x = tf.image.random_crop(x, [FLAGS.batch_size, 2*vh, 2*vw, 5])
         x = utils.distort(x, tf.placeholder_with_default([-0.0247903, 0.05102395,
             -0.03482873, 0.00815826], [4]))
     '''
-    x = tf.image.resize_images(x, [vh, vw])
-    features['img'] = x[:,:,:,:3]
-    features['label'] = tf.cast(x[:,:,:,3:], tf.bool)
+    #x = tf.image.resize_images(x, [vh, vw])
+
+    #features['img'] = x[:,:,:,:3]
+    #features['label'] = tf.cast(x[:,:,:,3:], tf.bool)
 
     images = features['img']
     labels = features['label']
-    prob_feat, mask = unet(images, is_training)
+    bbox_vec = features['bbox'] # shape: [? 4] ==> [x y w h]
+    bbox_mask = features['bbox_mask'] 
+
+    feat, mask = unet(images, is_training)
     #loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prob_feat,
     #                labels=labels))
-    seg = tf.clip_by_value(tf.nn.softmax(prob_feat), 1e-6, 1.0)
+    seg = tf.clip_by_value(tf.nn.softmax(feat[:,:,:,:2]), 1e-6, 1.0)
+    region = feat[:,:,:,2] # raw features for bbox location
+    bbox = feat[:,:,:,3:] # [w, h]
 
     labels = tf.cast(labels, tf.float32)
-    loss = tf.reduce_mean(  
+    
+    seg_loss = tf.reduce_mean(  
          -tf.reduce_sum(labels * tf.log(seg), axis=-1))
     
+    bbox_loc_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+            labels = tf.reshape(bbox_mask, [FLAGS.batch_size, -1]), 
+            logits = tf.reshape(region, [FLAGS.batch_size, -1])))
+
+    # width and height regression
+    bbox_wh_loss = tf.reduce_mean(
+            tf.square(tf.reshape(bbox_vec[:, 2:4], [FLAGS.batch_size, 1, 1, 2]) - bbox))
+
+    loss = seg_loss + bbox_loc_loss +  bbox_wh_loss
+
     with tf.variable_scope("stats"):
         tf.summary.scalar("loss", loss)
 
