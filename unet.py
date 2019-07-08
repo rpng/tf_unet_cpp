@@ -213,16 +213,21 @@ def model_fn(features, labels, mode, hparams):
     
     seg_loss = tf.reduce_mean(  
          -tf.reduce_sum(labels * tf.log(seg), axis=-1))
-    
+    batch_size = tf.shape(labels)[0]
     bbox_loc_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels = tf.reshape(bbox_mask, [FLAGS.batch_size, -1]), 
-            logits = tf.reshape(region, [FLAGS.batch_size, -1])))
+            labels = tf.reshape(bbox_mask, [batch_size, -1]), 
+            logits = tf.reshape(region, [batch_size, -1])))
 
     # width and height regression
     bbox_wh_loss = tf.reduce_mean(
-            tf.square(tf.reshape(bbox_vec[:, 2:4], [FLAGS.batch_size, 1, 1, 2]) - bbox))
+            tf.square(tf.reshape(bbox_vec[:, 2:4], [-1, 1, 1, 2]) - bbox))
+    '''
+    seg_loss = tf.Print(seg_loss, [seg_loss], "seg")
+    bbox_lox_loss = tf.Print(bbox_loc_loss, [bbox_loc_loss], "bbox_loc")
+    bbox_wh_loss = tf.Print(bbox_wh_loss, [bbox_wh_loss], "bbox_wh")
+    '''
 
-    loss = seg_loss + bbox_loc_loss +  bbox_wh_loss
+    loss = seg_loss + bbox_loc_loss + 0.01 * bbox_wh_loss
 
     with tf.variable_scope("stats"):
         tf.summary.scalar("loss", loss)

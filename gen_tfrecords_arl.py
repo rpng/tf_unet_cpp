@@ -145,7 +145,7 @@ def generate():
                 bbox_mask[max(min(bbox[1], vh-1), 0), max(min(bbox[0], vw-1), 0)] = 1
 
                 features_ = {
-                    'bbox': int64_feature(bbox),
+                    'bbox': bytes_feature(tf.compat.as_bytes(bbox.tostring())),
                     'bbox_mask': bytes_feature(tf.compat.as_bytes(bbox_mask.tostring())),
                     'img': bytes_feature(tf.compat.as_bytes(image.tostring())),
                     'label': bytes_feature(tf.compat.as_bytes(mask_label.astype(np.uint8).tostring()))
