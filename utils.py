@@ -237,7 +237,7 @@ def display_trainable_parameters():
 
     print("\n\nTrainable Parameters: %d\n\n" % total_parameters)
 
-def mask_helper(im, pred, mask, title):
+def mask_helper(im, pred, mask, title, bbox=None):
     h, w = pred.shape[:2]
     rgb1 = np.zeros((h, w, 3))
     rgb2 = np.zeros((h, w, 3))
@@ -261,6 +261,10 @@ def mask_helper(im, pred, mask, title):
 
     image1 = 0.3 * im + 0.7 * rgb1
     image2 = 0.3 * im + 0.7 * rgb2
+
+    if bbox is not None:
+        cv2.rectangle(image2, (int(bbox[0]), int(bbox[1])), (int(bbox[0]+bbox[2]), int(bbox[1]+bbox[3])), 
+                        (1.0, 0, 0), 2)
 
     global preddata
     global gtdata
@@ -326,6 +330,8 @@ class TrainingHook(tf.train.SessionRunHook):
             "im": graph.get_collection("im")[0],
             "pred": graph.get_collection("pred")[0],
             "label": graph.get_collection("label")[0],
+            "bbox_mask": graph.get_collection("bbox_mask")[0],
+            "bbox_wh": graph.get_collection("bbox_wh")[0],
         }
 
         return tf.train.SessionRunArgs(runargs)
@@ -353,8 +359,16 @@ class TrainingHook(tf.train.SessionRunHook):
             im = run_values.results["im"] / 255.0
             pred = run_values.results["pred"] 
             mask = run_values.results["label"] 
+            bbox_mask = run_values.results["bbox_mask"] 
+            bbox_wh = run_values.results["bbox_wh"] 
 
-            mask_helper(im, pred, mask, "Train")
+            bbox_loc = np.argmax(bbox_mask.reshape(-1))
+            y, x = np.unravel_index(bbox_loc, bbox_mask.shape)
+            w, h = bbox_wh[y, x]
+            # convert to opencv bbox
+            bbox = (x + w/2, y + h/2, w, h)
+
+            mask_helper(im, pred, mask, "Train", bbox)
             tp = (step,
                   self.steps,
                   time.strftime("%a %d %H:%M:%S", time.localtime(time.time() + eta_time)),
@@ -445,6 +459,8 @@ def standard_model_fn(func, steps, run_config,
         tf.add_to_collection("im", ret["im"])
         tf.add_to_collection("pred", ret["pred"])
         tf.add_to_collection("label", ret["label"])
+        tf.add_to_collection("bbox_mask", ret["bbox_mask"])
+        tf.add_to_collection("bbox_wh", ret["bbox_wh"])
         
         train_op = None
 

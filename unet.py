@@ -244,6 +244,8 @@ def model_fn(features, labels, mode, hparams):
           "loss": loss,
           "eval_metric_ops": eval_ops,
           'pred': mask[0],
+          'bbox_mask': region[0],
+          'bbox_wh': bbox[0],
           'im': im,
           'label': tf.argmax(labels[0], axis=-1)
     }
