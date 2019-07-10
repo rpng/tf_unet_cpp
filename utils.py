@@ -330,8 +330,7 @@ class TrainingHook(tf.train.SessionRunHook):
             "im": graph.get_collection("im")[0],
             "pred": graph.get_collection("pred")[0],
             "label": graph.get_collection("label")[0],
-            "bbox_mask": graph.get_collection("bbox_mask")[0],
-            "bbox_wh": graph.get_collection("bbox_wh")[0],
+            "bbox": graph.get_collection("bbox")[0],
         }
 
         return tf.train.SessionRunArgs(runargs)
@@ -359,15 +358,16 @@ class TrainingHook(tf.train.SessionRunHook):
             im = run_values.results["im"] / 255.0
             pred = run_values.results["pred"] 
             mask = run_values.results["label"] 
-            bbox_mask = run_values.results["bbox_mask"] 
-            bbox_wh = run_values.results["bbox_wh"] 
+            bbox = run_values.results["bbox"] 
 
+            # now done inside unet function
+            '''
             bbox_loc = np.argmax(bbox_mask.reshape(-1))
             y, x = np.unravel_index(bbox_loc, bbox_mask.shape)
             w, h = bbox_wh[y, x]
             # convert to opencv bbox
             bbox = (x + w/2, y + h/2, w, h)
-
+            '''
             mask_helper(im, pred, mask, "Train", bbox)
             tp = (step,
                   self.steps,
@@ -459,8 +459,7 @@ def standard_model_fn(func, steps, run_config,
         tf.add_to_collection("im", ret["im"])
         tf.add_to_collection("pred", ret["pred"])
         tf.add_to_collection("label", ret["label"])
-        tf.add_to_collection("bbox_mask", ret["bbox_mask"])
-        tf.add_to_collection("bbox_wh", ret["bbox_wh"])
+        tf.add_to_collection("bbox", ret["bbox"])
         
         train_op = None
 

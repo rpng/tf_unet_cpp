@@ -25,7 +25,7 @@ if __name__ == '__main__':
 
     tf.app.flags.DEFINE_string("model_dir", "model", "Estimator model_dir")
 
-    tf.app.flags.DEFINE_integer("steps", 50000, "Training steps")
+    tf.app.flags.DEFINE_integer("steps", 100000, "Training steps")
     tf.app.flags.DEFINE_string(
         "hparams", "",
         "A comma-separated list of `name=value` hyperparameter values. This flag "
@@ -33,8 +33,8 @@ if __name__ == '__main__':
         "selecting hyperparameters.")
 
     tf.app.flags.DEFINE_integer("batch_size", 20, "Size of mini-batch.")
-    tf.app.flags.DEFINE_boolean("fake_fisheye", False, "If true the data will be warped for"
-                                                       "fake fisheye.")
+    tf.app.flags.DEFINE_boolean("fake_fisheye", False, "If true the data will be warped")
+    tf.app.flags.DEFINE_boolean("pretraining", False, "If true, bbox is ignored")
     tf.app.flags.DEFINE_string("input_dir", "tfrecords_arl_wheels_bbox/", "tfrecords dir")
     tf.app.flags.DEFINE_string("image", "", "Image to predict on")
 
@@ -67,8 +67,9 @@ def create_input_fn(split, batch_size):
             features_ = {}
             features_['img'] = tf.FixedLenFeature([], tf.string)
             features_['label'] = tf.FixedLenFeature([], tf.string)
-            features_['bbox_mask'] = tf.FixedLenFeature([], tf.string)
-            features_['bbox'] = tf.FixedLenFeature([], tf.string)
+            if not FLAGS.pretraining:
+                features_['bbox_mask'] = tf.FixedLenFeature([], tf.string)
+                features_['bbox'] = tf.FixedLenFeature([], tf.string)
 
             fs = tf.parse_single_example(
                 serialized_example,
@@ -82,12 +83,16 @@ def create_input_fn(split, batch_size):
             #        tf.float32), [__vh,__vw,N_CLASSES])
             #else:
             fs['img'] = tf.reshape(tf.cast(tf.decode_raw(fs['img'], tf.uint8),
-                    tf.float32) / 255.0, [vh,vw,3])
+                    tf.float32) / 255.0, [vh, vw, 3])
             fs['label'] = tf.reshape(tf.cast(tf.decode_raw(fs['label'], tf.uint8),
-                    tf.float32), [vh,vw,N_CLASSES])
-            fs['bbox_mask'] = tf.reshape(tf.cast(tf.decode_raw(fs['bbox_mask'], tf.uint8),
-                    tf.float32), [vh,vw,1])
-            fs['bbox'] = tf.cast(tf.decode_raw(fs['bbox'], tf.int64), tf.float32)
+                    tf.float32), [vh, vw, N_CLASSES])
+            if not FLAGS.pretraining:
+                fs['bbox_mask'] = tf.reshape(tf.cast(tf.decode_raw(fs['bbox_mask'], tf.uint8),
+                        tf.float32), [vh,vw,1])
+                fs['bbox'] = tf.cast(tf.decode_raw(fs['bbox'], tf.int64), tf.float32)
+            else:
+                fs['bbox_mask'] = tf.zeros_like(fs['img'])
+                fs['bbox'] = tf.zeros([4], tf.float32)
             return fs
 
         #if split=='train':
@@ -169,8 +174,26 @@ def unet(images, is_training=False):
             
             pred = tf.nn.softmax(feat[:,:,:,:2], name='pred')
             mask = tf.argmax(pred, axis=-1, name='mask')
+            sh = tf.shape(feat)
+            # contiiguous bbox location along xy flattened
+            bbox_loc_cont = tf.argmax(tf.reshape(feat[:,:,:,2], [sh[0], -1]),
+                    axis=-1, output_type=tf.int32)
+            # [batch_size 2] list of bbox centers for each sample
+            bbox_loc = tf.unravel_index(bbox_loc_cont, [vh, vw])
+
+            n = vw * vh
+            row_inds = tf.range(0, n,
+                    dtype=tf.int32) * (n-1)
+            buffer_inds = row_inds + bbox_loc_cont # contiguous indexing
+
+            # now retrieve the bbox wh
+            wh_flat = tf.reshape(feat[:,:,:,3:], [-1, 2]) # [batch_size*h*w 2]
+            bbox_wh = tf.embedding_lookup(wh_flat, buffer_inds) # [batch_size 2]
             
-            return feat, mask
+            # concat and convert bboxes to opencv rect format
+            bbox = tf.concat([bbox_loc - bbox_wh / 2, bbox_wh], axis=-1, name='bbox')
+
+            return feat, mask, bbox
 
 def model_fn(features, labels, mode, hparams):
    
@@ -179,30 +202,30 @@ def model_fn(features, labels, mode, hparams):
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
     
     
-    #x = tf.concat([features['img'], features['label']], axis=-1)
+    x = tf.concat([features['img'], features['label']], axis=-1)
     # TODO add bbox here and uncomment
-    '''
+    
     x = tf.image.random_flip_left_right(x)
 
     # uncomment for fake fisheye
-
+    '''
     if is_training and FLAGS.fake_fisheye:
         x = tf.contrib.image.rotate(x, tf.random.normal([FLAGS.batch_size]))
-        x = tf.image.random_crop(x, [FLAGS.batch_size, 2*vh, 2*vw, 5])
+        x = tf.image.random_crop(x, [FLAGS.batch_size, vh, vw, 5])
         x = utils.distort(x, tf.placeholder_with_default([-0.0247903, 0.05102395,
             -0.03482873, 0.00815826], [4]))
-    '''
-    #x = tf.image.resize_images(x, [vh, vw])
+
+    x = tf.image.resize_images(x, [vh, vw])
 
     #features['img'] = x[:,:,:,:3]
     #features['label'] = tf.cast(x[:,:,:,3:], tf.bool)
-
+    '''
     images = features['img']
     labels = features['label']
     bbox_vec = features['bbox'] # shape: [? 4] ==> [x y w h]
     bbox_mask = features['bbox_mask'] 
 
-    feat, mask = unet(images, is_training)
+    feat, mask, _bbox = unet(images, is_training)
     #loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prob_feat,
     #                labels=labels))
     seg = tf.clip_by_value(tf.nn.softmax(feat[:,:,:,:2]), 1e-6, 1.0)
@@ -223,11 +246,14 @@ def model_fn(features, labels, mode, hparams):
             tf.square(tf.reshape(bbox_vec[:, 2:4], [-1, 1, 1, 2]) - bbox))
     '''
     seg_loss = tf.Print(seg_loss, [seg_loss], "seg")
-    bbox_lox_loss = tf.Print(bbox_loc_loss, [bbox_loc_loss], "bbox_loc")
+    bbox_loc_loss = tf.Print(bbox_loc_loss, [bbox_loc_loss], "bbox_loc")
     bbox_wh_loss = tf.Print(bbox_wh_loss, [bbox_wh_loss], "bbox_wh")
     '''
 
-    loss = seg_loss + bbox_loc_loss + 0.01 * bbox_wh_loss
+    if not FLAGS.pretraining:
+        loss = 10. * seg_loss + bbox_loc_loss + 0.01 * bbox_wh_loss
+    else:
+        loss = seg_loss
 
     with tf.variable_scope("stats"):
         tf.summary.scalar("loss", loss)
@@ -244,8 +270,7 @@ def model_fn(features, labels, mode, hparams):
           "loss": loss,
           "eval_metric_ops": eval_ops,
           'pred': mask[0],
-          'bbox_mask': region[0],
-          'bbox_wh': bbox[0],
+          'bbox': _bbox[0],
           'im': im,
           'label': tf.argmax(labels[0], axis=-1)
     }
