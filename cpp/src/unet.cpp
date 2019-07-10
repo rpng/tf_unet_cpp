@@ -64,17 +64,17 @@ UNet::UNet(int64_t __n) : n(__n), w(320), h(240), c(3), dims{__n, h, w, c}
     printf("\nStarted session. Status: %s\n\n", code ? msg : "SUCCESS");
     
     in_op = {TF_GraphOperationByName(graph, 
-            "UNet/images"), 0};
+            "UNet/images"), NULL};
     if (!in_op.oper) {
         fprintf(stderr, "Can't init in_op.");
     } else {
         printf("Successfully initialized in_op\n");
     }
 
-    out_op = {TF_GraphOperationByName(graph, 
-           "UNet/mask"), 0};
+    out_op[0] = {TF_GraphOperationByName(graph, "UNet/mask"), NULL};
+    out_op[1] = {TF_GraphOperationByName(graph, "UNet/bbox"), NULL};
     
-    if (!out_op.oper) {
+    if (!out_op[0].oper || !out_op[1].oper) {
         fprintf(stderr, "Can't init out_op.");
     } else {
         printf("Successfully initialized out_op\n");
@@ -94,7 +94,7 @@ UNet::UNet(int64_t __n) : n(__n), w(320), h(240), c(3), dims{__n, h, w, c}
     TF_SessionRun(sess,
                   NULL, // Run options.
                   &in_op, &input, 1, // Input tensors, input tensor values, number of inputs.
-                  &out_op, &output, 1, // Output tensors, output tensor values, number of outputs.
+                  out_op, output, 2, // Output tensors, output tensor values, number of outputs.
                   NULL, 0, // Target operations, number of targets.
                   NULL, // Run metadata.
                   status // Output status.
@@ -105,10 +105,15 @@ UNet::UNet(int64_t __n) : n(__n), w(320), h(240), c(3), dims{__n, h, w, c}
         TF_DeleteTensor(input);
         input = NULL;
     }
-    if (output)
+    if (output[0])
     {
-        TF_DeleteTensor(output);
-        output = NULL;
+        TF_DeleteTensor(output[0]);
+        output[0] = NULL;
+    }
+    if (output[1])
+    {
+        TF_DeleteTensor(output[1]);
+        output[1] = NULL;
     }
 
     printf("Successfully ran warm-up\n");
@@ -125,25 +130,32 @@ UNet::~UNet()
     }
     if (input)
         TF_DeleteTensor(input);
-    if (output)
-        TF_DeleteTensor(output);
+    if (output[0])
+        TF_DeleteTensor(output[0]);
+    if (output[1])
+        TF_DeleteTensor(output[1]);
     if (status)
         TF_DeleteStatus(status);
     printf("Successfully closed session and session data\n");
 
 }
 
-void UNet::run(const std::vector<cv::Mat>& _im, std::vector<cv::Mat>& out)
+std::vector<cv::Rect> UNet::run(const std::vector<cv::Mat>& _im, std::vector<cv::Mat>& out)
 {   
     if (input)
     {
         TF_DeleteTensor(input);
         input = NULL;
     }
-    if (output)
+    if (output[0])
     {
-        TF_DeleteTensor(output);
-        output = NULL;
+        TF_DeleteTensor(output[0]);
+        output[0] = NULL;
+    }
+    if (output[1])
+    {
+        TF_DeleteTensor(output[1]);
+        output[1] = NULL;
     }
 
     cv::Size sz(w, h);
@@ -177,13 +189,13 @@ void UNet::run(const std::vector<cv::Mat>& _im, std::vector<cv::Mat>& out)
     if (!input)
     { 
         fprintf(stderr, "Failed to create input tensor\n");
-        return;
+        return std::vector<cv::Rect>();
     }
     clock_t t0 = clock();
     TF_SessionRun(sess,
                   NULL, // Run options.
                   &in_op, &input, 1, // Input tensors, input tensor values, number of inputs.
-                  &out_op, &output, 1, // Output tensors, output tensor values, number of outputs.
+                  out_op, output, 2, // Output tensors, output tensor values, number of outputs.
                   NULL, 0, // Target operations, number of targets.
                   NULL, // Run metadata.
                   status // Output status.
@@ -193,18 +205,26 @@ void UNet::run(const std::vector<cv::Mat>& _im, std::vector<cv::Mat>& out)
     if (code)
     {
         const char* msg = TF_Message(status);
-        fprintf(stderr, "\nSession run error! Status: %s\n\n", msg);
-        return;
+        fprintf(stderr, "\nSession run error! Status: %s\n\n", msg); 
+        return std::vector<cv::Rect>();
     }
     
-    if (!output)
+    if (!output[0])
     { 
-        fprintf(stderr, "Failed to create output tensor!\n");
-        return;
+        fprintf(stderr, "Failed to create output mask tensor!\n");
+        return std::vector<cv::Rect>();
+    }
+    if (!output[1])
+    { 
+        fprintf(stderr, "Failed to create output bbox tensor!\n"); 
+        return std::vector<cv::Rect>();
     }
     
     // ret_data is only n w*h binary masks. No channel dim
-    int64_t* ret_data = (int64_t*)TF_TensorData(output);
+    int64_t* ret_data = (int64_t*)TF_TensorData(output[0]);
+    
+    // bounding box
+    float* ret_data_bbox = (float*)TF_TensorData(output[1]);
    
     uint8_t* ret_data_uint8 = (uint8_t*)malloc(n*w*h*sizeof(uint8_t));
     std::copy(ret_data, ret_data + n*w*h, ret_data_uint8);
@@ -219,12 +239,18 @@ void UNet::run(const std::vector<cv::Mat>& _im, std::vector<cv::Mat>& out)
     */
 
     
-    // finally save the generated mask into our return variable
+    //  save the generated mask into our return variable
+    //  also copy the bounding box data to cv::Rect
     out.resize(n);
-    for (int i = 0; i < n; i++) {   
+    std::vector<cv::Rect> bboxes(n);
+    for (int i = 0; i < n; i++) 
+    {   
         out[i] = cv::Mat(sz, CV_8UC1, ret_data_uint8 + i*h*w);
+        bboxes[i] = cv::Rect(ret_data_bbox[i*4 + 0], ret_data_bbox[i*4 + 1], 
+                        ret_data_bbox[i*4 + 2], ret_data_bbox[i*4 + 3]);
     }
 
+    return bboxes;
 }
 
 

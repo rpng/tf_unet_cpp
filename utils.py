@@ -263,8 +263,10 @@ def mask_helper(im, pred, mask, title, bbox=None):
     image2 = 0.3 * im + 0.7 * rgb2
 
     if bbox is not None:
-        cv2.rectangle(image2, (int(bbox[0]), int(bbox[1])), (int(bbox[0]+bbox[2]), int(bbox[1]+bbox[3])), 
-                        (1.0, 0, 0), 2)
+        print(bbox)
+        cv2.rectangle(image2, (int(bbox[0]), int(bbox[1])), 
+                (int(bbox[0]+bbox[2]), int(bbox[1]+bbox[3])), 
+                (1.0, 0, 0), 2)
 
     global preddata
     global gtdata

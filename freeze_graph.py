@@ -95,7 +95,7 @@ def freeze_graph(model_dir, output_node_names):
         output_graph_def = tf.graph_util.convert_variables_to_constants(
             sess, # The session is used to retrieve the weights
             gd, # The graph_def is used to retrieve the nodes 
-            output_node_names.split(",") # The output node names are used to select the usefull nodes
+            output_node_names # The output node names are used to select the usefull nodes
         ) 
 
         # Finally we serialize and dump the output graph to the filesystem
@@ -118,7 +118,7 @@ def optimize_for_inference():
         #    text_format.Merge(data.decode("utf-8"), input_graph_def)
     
     input_names = ["UNet/images"]
-    output_names = ["UNet/mask"]
+    output_names = ["UNet/mask", "UNet/bbox"]
 
     output_graph_def = optimize_for_inference_lib.optimize_for_inference(
       input_graph_def,
@@ -134,7 +134,7 @@ if __name__ == '__main__':
     parser.add_argument("--model_dir", type=str, default="model", help="Model folder to export")
     args = parser.parse_args()
 
-    freeze_graph(args.model_dir, "UNet/mask")
+    freeze_graph(args.model_dir, ["UNet/mask", "UNet/bbox"])
     print("Graph frozen successfully, optimizing for inference...")
     optimize_for_inference()
     print("Optimized successfully, done.")

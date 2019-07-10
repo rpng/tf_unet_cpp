@@ -16,13 +16,13 @@ class UNet
 public:
     UNet(int64_t n);
     ~UNet();
-    void run(const std::vector<cv::Mat>& im, std::vector<cv::Mat>& out);
+    std::vector<cv::Rect> run(const std::vector<cv::Mat>& im, std::vector<cv::Mat>& out);
 
     TF_Graph* graph;
     TF_Status* status;
     TF_Session* sess;
-    TF_Tensor *input, *output;
-    TF_Output in_op, out_op;
+    TF_Tensor *input, *output[2];
+    TF_Output in_op, out_op[2];
     int64_t n, w, h, c, s;
     int64_t dims[4];
 };

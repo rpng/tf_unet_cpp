@@ -116,7 +116,7 @@ int main(int argc, char* argv[])
             // Run the actual network
             clock_t t0 = clock();
             std::vector<cv::Mat> masks_raw;
-            unet.run(imgvec, masks_raw);
+            std::vector<cv::Rect> bboxes = unet.run(imgvec, masks_raw);
             assert(masks_raw.size()==1);
 
             // Get inference time and update stats
@@ -152,12 +152,14 @@ int main(int argc, char* argv[])
 
             //============================================================
             //============================================================
-
+            
             // Find the bounding box
             cv::Mat mask = masks_raw.at(0).clone();
+            /* // Now done by CNN
             std::vector<cv::Point> approx_curve;
-            cv::Rect bbox = get_bounding_box(mask,approx_curve);
-
+            */
+            cv::Rect bbox = bboxes.at(0); // get_bounding_box(mask,approx_curve);
+            
             // Do our kalman filtering
             cv::Rect bbox_kf;
             bool success = update_kf(cams_msgs.at(i).at(j)->header.stamp.toSec(), bbox, bbox_kf);
