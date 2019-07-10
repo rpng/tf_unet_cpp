@@ -137,8 +137,8 @@ def generate():
             else:
                 bbox = np.int64(bbox)
                 # make bbox center oriented
-                bbox[0] = bbox[0] - bbox[2] // 2
-                bbox[1] = bbox[1] - bbox[2] // 2
+                bbox[0] = bbox[0] + bbox[2] // 2
+                bbox[1] = bbox[1] + bbox[2] // 2
 
                 # 1 where bbox center is
                 bbox_mask = np.zeros((vh, vw), np.uint8)

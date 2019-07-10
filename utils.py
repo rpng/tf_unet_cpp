@@ -366,7 +366,7 @@ class TrainingHook(tf.train.SessionRunHook):
             y, x = np.unravel_index(bbox_loc, bbox_mask.shape)
             w, h = bbox_wh[y, x]
             # convert to opencv bbox
-            bbox = (x + w/2, y + h/2, w, h)
+            bbox = (x - w/2, y - h/2, w, h)
             '''
             mask_helper(im, pred, mask, "Train", bbox)
             tp = (step,
