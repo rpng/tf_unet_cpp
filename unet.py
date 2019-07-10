@@ -179,19 +179,27 @@ def unet(images, is_training=False):
             bbox_loc_cont = tf.argmax(tf.reshape(feat[:,:,:,2], [sh[0], -1]),
                     axis=-1, output_type=tf.int32)
             # [batch_size 2] list of bbox centers for each sample
-            bbox_loc = tf.unravel_index(bbox_loc_cont, [vh, vw])
+            bbox_loc = tf.transpose(tf.unravel_index(bbox_loc_cont, [vh, vw]), [1, 0])
 
             n = vw * vh
-            row_inds = tf.range(0, n,
+            row_inds = tf.range(0, sh[0],
                     dtype=tf.int32) * (n-1)
             buffer_inds = row_inds + bbox_loc_cont # contiguous indexing
 
             # now retrieve the bbox wh
             wh_flat = tf.reshape(feat[:,:,:,3:], [-1, 2]) # [batch_size*h*w 2]
-            bbox_wh = tf.embedding_lookup(wh_flat, buffer_inds) # [batch_size 2]
-            
+            bbox_wh = tf.cast(tf.round(
+                tf.nn.embedding_lookup(wh_flat, buffer_inds)), tf.int32) # [batch_size 2]
+            '''
+            print(buffer_inds.get_shape())
+            print(bbox_loc_cont.get_shape())
+            print(bbox_loc.get_shape())
+            print(bbox_wh.get_shape())
+            exit()
+            '''
             # concat and convert bboxes to opencv rect format
-            bbox = tf.concat([bbox_loc - bbox_wh / 2, bbox_wh], axis=-1, name='bbox')
+            bbox = tf.concat([bbox_loc - tf.cast(bbox_wh/2, tf.int32), bbox_wh], 
+                    axis=-1, name='bbox')
 
             return feat, mask, bbox
 
