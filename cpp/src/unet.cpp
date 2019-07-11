@@ -64,15 +64,15 @@ UNet::UNet(int64_t __n) : n(__n), w(320), h(240), c(3), dims{__n, h, w, c}
     printf("\nStarted session. Status: %s\n\n", code ? msg : "SUCCESS");
     
     in_op = {TF_GraphOperationByName(graph, 
-            "UNet/images"), NULL};
+            "UNet/images"), 0};
     if (!in_op.oper) {
         fprintf(stderr, "Can't init in_op.");
     } else {
         printf("Successfully initialized in_op\n");
     }
 
-    out_op[0] = {TF_GraphOperationByName(graph, "UNet/mask"), NULL};
-    out_op[1] = {TF_GraphOperationByName(graph, "UNet/bbox"), NULL};
+    out_op[0] = {TF_GraphOperationByName(graph, "UNet/mask"), 0};
+    out_op[1] = {TF_GraphOperationByName(graph, "UNet/bbox"), 0};
     
     if (!out_op[0].oper || !out_op[1].oper) {
         fprintf(stderr, "Can't init out_op.");
