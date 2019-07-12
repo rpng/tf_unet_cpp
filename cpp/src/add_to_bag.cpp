@@ -1,6 +1,7 @@
 #include <rosbag/bag.h>
 #include <rosbag/view.h>
 #include <sensor_msgs/Image.h>
+#include <geometry_msgs/QuaternionStamped.h>
 #include <cv_bridge/cv_bridge.h>
 #include <stdio.h>
 #include <iostream>
@@ -17,7 +18,7 @@ int main(int argc, char* argv[])
     // Ensure we have enough arguments
     if (argc < 3) {
         std::cerr << "please specify the bag and if you want to append to it" << std::endl;
-        std::cerr << "example: ./add_to_bag <do_append2bag> <filename.bag>" << std::endl;
+        std::cerr << "format: ./add_to_bag <do_append2bag (1 or 0)> <filename.bag>" << std::endl;
         return -1;
     }
 
@@ -35,9 +36,14 @@ int main(int argc, char* argv[])
     std::vector<std::string> topics_in, topics_out;
     topics_in.push_back("/cam0/image_raw");
     topics_out.push_back("/cam0/image_mask");
+    topics_out.push_back("/cam0/bbox");
+
     topics_in.push_back("/cam1/image_raw");
     topics_out.push_back("/cam1/image_mask");
-    assert(topics_in.size()==topics_out.size());
+    topics_out.push_back("/cam1/bbox");
+
+    // 2x for mask and bbox per image
+    assert(2 * topics_in.size() == topics_out.size());
 
     // Debug printing
     std::cout << "Loading ROS Bag File.." << std::endl;
@@ -91,7 +97,7 @@ int main(int argc, char* argv[])
     for(size_t i=0; i<topics_in.size(); i++) {
 
         // Init our Kalman filter!
-        initialize_kf(do_stereo);
+        initialize_kf();
 
         // Stats for average inference times
         double sum_inf = 0;
@@ -117,7 +123,7 @@ int main(int argc, char* argv[])
             clock_t t0 = clock();
             std::vector<cv::Mat> masks_raw;
             std::vector<cv::Rect> bboxes = unet.run(imgvec, masks_raw);
-            assert(masks_raw.size()==1);
+            //assert(masks_raw.size()==1);
 
             // Get inference time and update stats
             double inference_time =  1000*((double)(clock()-t0) / CLOCKS_PER_SEC);
@@ -137,17 +143,28 @@ int main(int argc, char* argv[])
             //============================================================
             
 
-            // Now write the mask image back to the bag if we need to
-            if(do_append2bag) {
+            // Now write the mask image and bounding box to the bag if we need to
+            if (do_append2bag) {
                 cv_bridge::CvImage img_bridge;
-                img_bridge = cv_bridge::CvImage(cams_msgs.at(i).at(j)->header, sensor_msgs::image_encodings::TYPE_8UC1, 255*masks_raw.at(0));
+                img_bridge = cv_bridge::CvImage(cams_msgs.at(i).at(j)->header,
+                        sensor_msgs::image_encodings::TYPE_8UC1, 255*masks_raw.at(0));
                 // out_msg.encoding = sensor_msgs::image_encodings::TYPE_8UC1;
                 // out_msg.header = cams_msgs.at(i).at(j)->header; 
                 // out_msg.image = ;
                 // out_msg.image = 255*masks_raw.at(0);
                 sensor_msgs::Image img_msg;
                 img_bridge.toImageMsg(img_msg);
-                bag.write(topics_out.at(i),img_msg.header.stamp,img_msg);
+                bag.write(topics_out.at(2 * i),img_msg.header.stamp,img_msg);
+
+                // Define bounding box as x y w h in QuaternionStamped msg
+                geometry_msgs::QuaternionStamped bbox_msg;
+                bbox_msg.header.stamp = img_msg.header.stamp;
+                cv::Rect bbox = bboxes.at(0);
+                bbox_msg.quaternion.x = bbox.x;
+                bbox_msg.quaternion.y = bbox.y;
+                bbox_msg.quaternion.z = bbox.width;
+                bbox_msg.quaternion.w = bbox.height;
+                bag.write(topics_out.at(2 * i + 1), bbox_msg.header.stamp, bbox_msg);
             }
 
             //============================================================
@@ -155,14 +172,17 @@ int main(int argc, char* argv[])
             
             // Find the bounding box
             cv::Mat mask = masks_raw.at(0).clone();
-            /* // Now done by CNN
             std::vector<cv::Point> approx_curve;
-            */
-            cv::Rect bbox = bboxes.at(0); // get_bounding_box(mask,approx_curve);
+            cv::Rect bbox_net = bboxes.at(0); // bbox from the net
+            cv::Rect bbox_mask =  get_bounding_box(mask,approx_curve); // bbox from the nets mask
+            // combine the bboxes directly from the net and from the mask and 
+            // send to the kalman filter
+            cv::Rect bbox_meas[2] = {bbox_net, bbox_mask};
             
             // Do our kalman filtering
             cv::Rect bbox_kf;
-            bool success = update_kf(cams_msgs.at(i).at(j)->header.stamp.toSec(), bbox, bbox_kf);
+            bool success = update_kf(cams_msgs.at(i).at(j)->header.stamp.toSec(), 
+                    bbox_meas, bbox_kf);
             
             // Debug display of the 
             cv::Mat im = imgvec.at(0);
@@ -191,7 +211,8 @@ int main(int argc, char* argv[])
             }
             
             // draw bounding boxes
-            cv::rectangle(im2, bbox, cv::Scalar(255,0,0), 1);
+            cv::rectangle(im2, bbox_net, cv::Scalar(255,0,0), 1);
+            cv::rectangle(im2, bbox_mask, cv::Scalar(255,0,255), 1);
             if(success) cv::rectangle(im2, bbox_kf, cv::Scalar(0,255,0), 1);
             else cv::rectangle(im2, bbox_kf, cv::Scalar(0,0,255), 2);
 

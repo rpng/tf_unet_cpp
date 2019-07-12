@@ -2,7 +2,7 @@ SHELL := /bin/bash
 CPP := g++
 CFLAGS := -O3 -march=native -std=c++11 -Wall -g
 LDFLAGS := -ltensorflow `pkg-config --libs --cflags opencv4` 
-ROSFLAGS := `pkg-config --libs --cflags rosbag` `pkg-config --libs --cflags sensor_msgs` `pkg-config --libs --cflags cv_bridge`
+ROSFLAGS := `pkg-config --libs --cflags rosbag` `pkg-config --libs --cflags sensor_msgs` `pkg-config --libs --cflags geometry_msgs` `pkg-config --libs --cflags cv_bridge`
 
 all: obj main bag
 main: obj
