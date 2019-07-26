@@ -100,16 +100,26 @@ void initialize_kf() {
     // kf.processNoiseCov.at<float>(21) = 5.0f;
     // kf.processNoiseCov.at<float>(28) = 1.0f;
     // kf.processNoiseCov.at<float>(35) = 1.0f;
-    kf.processNoiseCov.at<float>(0) = 1e-1;
-    kf.processNoiseCov.at<float>(7) = 1e-1;
+    kf.processNoiseCov.at<float>(0) = 100.0f;
+    kf.processNoiseCov.at<float>(7) = 100.0f;
     kf.processNoiseCov.at<float>(14) = 1.0f;
     kf.processNoiseCov.at<float>(21) = 1.0f;
-    kf.processNoiseCov.at<float>(28) = 1e-1;
-    kf.processNoiseCov.at<float>(35) = 1e-1;
+    kf.processNoiseCov.at<float>(28) = 100.0f;
+    kf.processNoiseCov.at<float>(35) = 100.0f;
 
     // Measures Noise Covariance Matrix R
-    // cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(1));
-    cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(10));
+    
+    // From the net (raw)
+    kf.measurementNoiseCov.at<float>(0 * 8 + 0) = 1000.0f;
+    kf.measurementNoiseCov.at<float>(1 * 8 + 1) = 1000.0f;
+    kf.measurementNoiseCov.at<float>(2 * 8 + 2) = 1000.0f;
+    kf.measurementNoiseCov.at<float>(3 * 8 + 3) = 1000.0f;
+
+    // From the mask
+    kf.measurementNoiseCov.at<float>(4 * 8 + 4) = 1000.0f;
+    kf.measurementNoiseCov.at<float>(5 * 8 + 5) = 1000.0f;
+    kf.measurementNoiseCov.at<float>(6 * 8 + 6) = 1000.0f;
+    kf.measurementNoiseCov.at<float>(7 * 8 + 7) = 1000.0f;
 
 }
 
@@ -193,7 +203,7 @@ bool update_kf(double newTimeStep, const cv::Rect *measBB, cv::Rect& upRect) {
         // std::cout << "kf error = " << err << std::endl;
         std::cout << "chi2 = " << chi.at<float>(0) << std::endl;
 
-        if(chi.at<float>(0) < 200) {
+        if(chi.at<float>(0) < 300) {
             kf.correct(meas);
             lastTimeStep = newTimeStep;
             did_update = true;
