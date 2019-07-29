@@ -100,12 +100,12 @@ void initialize_kf() {
     // kf.processNoiseCov.at<float>(21) = 5.0f;
     // kf.processNoiseCov.at<float>(28) = 1.0f;
     // kf.processNoiseCov.at<float>(35) = 1.0f;
-    kf.processNoiseCov.at<float>(0) = 100.0f;
-    kf.processNoiseCov.at<float>(7) = 100.0f;
+    kf.processNoiseCov.at<float>(0) = 1e-1;
+    kf.processNoiseCov.at<float>(7) = 1e-1;
     kf.processNoiseCov.at<float>(14) = 1.0f;
     kf.processNoiseCov.at<float>(21) = 1.0f;
-    kf.processNoiseCov.at<float>(28) = 100.0f;
-    kf.processNoiseCov.at<float>(35) = 100.0f;
+    kf.processNoiseCov.at<float>(28) = 1e-1;
+    kf.processNoiseCov.at<float>(35) = 1e-1;
 
     // Measures Noise Covariance Matrix R
     
@@ -203,7 +203,7 @@ bool update_kf(double newTimeStep, const cv::Rect *measBB, cv::Rect& upRect) {
         // std::cout << "kf error = " << err << std::endl;
         std::cout << "chi2 = " << chi.at<float>(0) << std::endl;
 
-        if(chi.at<float>(0) < 300) {
+        if(chi.at<float>(0) < 6.66) {
             kf.correct(meas);
             lastTimeStep = newTimeStep;
             did_update = true;

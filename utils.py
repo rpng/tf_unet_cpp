@@ -506,7 +506,7 @@ def train_and_eval(model_dir,
     input_fn,
     hparams,
     log_steps=32,
-    save_steps=128,
+    save_steps=2500,
     summary_steps=128,
     eval_start_delay_secs=600,
     eval_throttle_secs=0):

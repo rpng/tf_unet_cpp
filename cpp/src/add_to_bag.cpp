@@ -12,6 +12,9 @@
 #include "unet.h"
 #include "tracker.h"
 
+// TODO use this
+#include "args.h"
+
 int main(int argc, char* argv[])
 {
 
@@ -21,16 +24,15 @@ int main(int argc, char* argv[])
         std::cerr << "format: ./add_to_bag <do_append2bag (1 or 0)> <filename.bag>" << std::endl;
         return -1;
     }
-
-
+    
     // Load the bag that we want to process
     std::string bag_fl = argv[2];
-
+    
     // If we should append to the bag file
     bool do_append2bag = (std::string(argv[1])=="1");
 
     // If the system is stereo
-    bool do_stereo = false;
+    //bool do_stereo = false;
 
     // Topics that we want to compute masks for
     std::vector<std::string> topics_in, topics_out;
@@ -229,13 +231,22 @@ int main(int argc, char* argv[])
             cv::hconcat(im2, mask2, imout);
             cv::hconcat(imout, im3, imout);
             cv::resize(imout, imout, cv::Size(6*320, 2*240));
+
             cv::imshow(windowname, imout);
             cv::waitKey(1);
-
+            /*
+            if (i==0)
+            {
+                char fl[30];
+                sprintf(fl, "images/image%010ld.png", j);
+                cv::imwrite(std::string(fl), imout);
+            }
+            */
         }
 
 
     }
 
     bag.close();
+    return 0;
 }

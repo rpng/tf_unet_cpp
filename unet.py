@@ -175,9 +175,9 @@ def unet(images, is_training=False):
             pred = tf.nn.softmax(feat[:,:,:,:2], name='pred')
             mask = tf.argmax(pred, axis=-1, name='mask')
             sh = tf.shape(feat)
-            # contiiguous bbox location along xy flattened
-            bbox_loc_cont = tf.argmax(tf.nn.softmax(tf.reshape(feat[:,:,:,2], [sh[0], -1])),
-                    axis=-1, output_type=tf.int32)
+            bbox_scores = tf.nn.softmax(tf.reshape(feat[:,:,:,2], [sh[0], -1]))
+            # contiguous bbox location along xy flattened (not differentiable)
+            bbox_loc_cont = tf.argmax(bbox_scores, axis=-1, output_type=tf.int32)
             # [batch_size 2] list of bbox centers for each sample
             bbox_loc = tf.transpose(tf.unravel_index(bbox_loc_cont, [vh, vw]), [1, 0])
 
@@ -186,9 +186,12 @@ def unet(images, is_training=False):
                     dtype=tf.int32) * (n-1)
             buffer_inds = row_inds + bbox_loc_cont # contiguous indexing
 
-            # now retrieve the bbox wh
-            wh_flat = tf.reshape(tf.nn.softplus(feat[:,:,:,3:]), [-1, 2]) # [batch_size*h*w 2]
-            bbox_wh = tf.nn.embedding_lookup(wh_flat, buffer_inds) # [batch_size 2]
+            # now retrieve the bbox wh and score
+            whs_flat = tf.concat(
+                    [tf.reshape(tf.nn.softplus(feat[:,:,:,3:]), [-1, 2]),   
+                    tf.reshape(bbox_scores, [-1, 1])], -1) # [batch_size*h*w 3]
+
+            bbox_whs = tf.nn.embedding_lookup(whs_flat, buffer_inds) # [batch_size 3]
             '''
             print(buffer_inds.get_shape())
             print(bbox_loc_cont.get_shape())
@@ -196,10 +199,10 @@ def unet(images, is_training=False):
             print(bbox_wh.get_shape())
             exit()
             '''
-            # concat and convert bboxes to opencv rect format
-            # reverse to get [y x] to [x y]
-            bbox = tf.concat([tf.reverse(tf.cast(bbox_loc, tf.float32), [1]) - bbox_wh/2,
-                    bbox_wh], axis=-1, name='bbox')
+            # concat and convert bboxes to opencv rect format with an extra score component
+            # reverse to get [y x] to [x y] for [x y w h score]
+            bbox = tf.concat([tf.reverse(tf.cast(bbox_loc, tf.float32), [1]) - bbox_whs[:,:2]/2,
+                    bbox_whs], axis=-1, name='bbox')
 
             return feat, mask, bbox
 
@@ -230,7 +233,7 @@ def model_fn(features, labels, mode, hparams):
     '''
     images = features['img']
     labels = features['label']
-    bbox_vec = features['bbox'] # shape: [? 4] ==> [x y w h]
+    bbox_vec = features['bbox'] # shape: [? 5] ==> [x y w h score]
     bbox_mask = features['bbox_mask'] 
 
     feat, mask, _bbox = unet(images, is_training)
@@ -259,7 +262,7 @@ def model_fn(features, labels, mode, hparams):
     '''
 
     if not FLAGS.pretraining:
-        loss = 10. * seg_loss + bbox_loc_loss + 0.01 * bbox_wh_loss
+        loss = seg_loss + bbox_loc_loss + 0.01 * bbox_wh_loss
     else:
         loss = seg_loss
 
@@ -278,7 +281,7 @@ def model_fn(features, labels, mode, hparams):
           "loss": loss,
           "eval_metric_ops": eval_ops,
           'pred': mask[0],
-          'bbox': _bbox[0],
+          'bbox': _bbox[0,:-1], # ignore score
           'im': im,
           'label': tf.argmax(labels[0], axis=-1)
     }

@@ -20,7 +20,7 @@ FLAGS = tf.app.flags.FLAGS
 if __name__ == '__main__':
    
     tf.app.flags.DEFINE_string("output_dir", "tfrecords/", "")
-    tf.app.flags.DEFINE_string("arl_root", "/mnt/f3be6b3c-80bb-492a-98bf-4d0d674a51d6/ARL/labelbox/", "")
+    tf.app.flags.DEFINE_string("arl_root", "/mnt/f3be6b3c-80bb-492a-98bf-4d0d674a51d6/ARL/labelbox_dset_v2/", "")
     tf.app.flags.DEFINE_integer("num_files", 2, "Num files to write for train dataset. More files=better randomness")
     tf.app.flags.DEFINE_boolean("debug", False, "")
     tf.app.flags.DEFINE_boolean("wheels", True, "")
@@ -80,9 +80,12 @@ def generate():
                 cv2.IMREAD_GRAYSCALE), (vw, vh),
                 interpolation = cv2.INTER_NEAREST)[..., np.newaxis]
 
-            wheels = cv2.resize(cv2.imread(lab_fls[1], 
-                cv2.IMREAD_GRAYSCALE), (vw, vh), 
-                interpolation = cv2.INTER_NEAREST)[..., np.newaxis]
+            wheels = cv2.imread(lab_fls[1], cv2.IMREAD_GRAYSCALE)
+            if (wheels is not None and wheels.size > 0):
+                wheels = cv2.resize(wheels, (vw, vh), 
+                    interpolation = cv2.INTER_NEAREST)[..., np.newaxis]
+            else: # If no wheels label provided
+                wheels = np.zeros_like(car)
 
             lab = np.uint8(np.logical_or(car, wheels))
         else:
