@@ -10,8 +10,8 @@ import cv2
 import tensorflow as tf
 from time import time
 
-vh = 240
-vw = 320
+vh = 480
+vw = 640
 
 val_split = 10
 
@@ -20,10 +20,10 @@ FLAGS = tf.app.flags.FLAGS
 if __name__ == '__main__':
    
     tf.app.flags.DEFINE_string("output_dir", "tfrecords/", "")
-    tf.app.flags.DEFINE_string("arl_root", "/mnt/f3be6b3c-80bb-492a-98bf-4d0d674a51d6/ARL/labelbox_dset_v2/", "")
+    tf.app.flags.DEFINE_string("arl_root", "/home/rpng/datasets/ARL/labelbox", "")
     tf.app.flags.DEFINE_integer("num_files", 2, "Num files to write for train dataset. More files=better randomness")
     tf.app.flags.DEFINE_boolean("debug", False, "")
-    tf.app.flags.DEFINE_boolean("wheels", True, "")
+    tf.app.flags.DEFINE_boolean("wheels", False, "")
     
 
     if FLAGS.debug:
@@ -52,7 +52,7 @@ def bytes_feature(values):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[values]))
 
 def int64_feature(value):
-    return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 def generate():
    
@@ -74,20 +74,12 @@ def generate():
 
         print("Working on sample %d" % i)
 
-        image = cv2.resize(cv2.imread(im_fl), (vw, vh))
+        image = cv2.imread(im_fl)
         if FLAGS.wheels:
-            car = cv2.resize(cv2.imread(lab_fls[0], 
-                cv2.IMREAD_GRAYSCALE), (vw, vh),
-                interpolation = cv2.INTER_NEAREST)[..., np.newaxis]
-
-            wheels = cv2.imread(lab_fls[1], cv2.IMREAD_GRAYSCALE)
-            if (wheels is not None and wheels.size > 0):
-                wheels = cv2.resize(wheels, (vw, vh), 
-                    interpolation = cv2.INTER_NEAREST)[..., np.newaxis]
-            else: # If no wheels label provided
-                wheels = np.zeros_like(car)
-
-            lab = np.uint8(np.logical_or(car, wheels))
+            lab = np.logical_or(cv2.imread(lab_fls[0], 
+                cv2.IMREAD_GRAYSCALE)[..., np.newaxis],
+                cv2.imread(lab_fls[1], 
+                cv2.IMREAD_GRAYSCALE)[..., np.newaxis])
         else:
             lab = cv2.imread(lab_fls[0], 
                 cv2.IMREAD_GRAYSCALE)[..., np.newaxis]
@@ -95,12 +87,8 @@ def generate():
         mask_label = np.zeros((vh, vw, 2), dtype=np.bool)
         mask_label[:, :, 1:2] = lab
         if np.any(mask_label[:,:,1]):
-            # calculate bbox
-            contours = cv2.findContours(lab, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            bbox = cv2.boundingRect(contours[0])
             mean += np.mean(image / 255.0, axis=(0,1))
             mask_label[:, :, 0] = np.logical_not(mask_label[:, :, 1])
-                
             if FLAGS.debug:
                 mask = np.argmax(mask_label, axis=-1)
                 rgb = np.zeros((vh, vw, 3))
@@ -119,8 +107,6 @@ def generate():
                 _image = cv2.resize(image, (vw, vh)) / 255.0
 
                 _image = 0.3 * _image + 0.7 * rgb
-                cv2.rectangle(_image, (bbox[0], bbox[1]), (bbox[0]+bbox[2], bbox[1]+bbox[3]), 
-                        (1.0, 0, 0), 2)
 
                 global imdata
                 if imdata is None:
@@ -138,18 +124,7 @@ def generate():
                 plt.pause(3)
 
             else:
-                bbox = np.int64(bbox)
-                # make bbox center oriented
-                bbox[0] = bbox[0] + bbox[2] // 2
-                bbox[1] = bbox[1] + bbox[2] // 2
-
-                # 1 where bbox center is
-                bbox_mask = np.zeros((vh, vw), np.uint8)
-                bbox_mask[max(min(bbox[1], vh-1), 0), max(min(bbox[0], vw-1), 0)] = 1
-
                 features_ = {
-                    'bbox': bytes_feature(tf.compat.as_bytes(bbox.tostring())),
-                    'bbox_mask': bytes_feature(tf.compat.as_bytes(bbox_mask.tostring())),
                     'img': bytes_feature(tf.compat.as_bytes(image.tostring())),
                     'label': bytes_feature(tf.compat.as_bytes(mask_label.astype(np.uint8).tostring()))
                 }

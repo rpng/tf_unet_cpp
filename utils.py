@@ -52,52 +52,6 @@ class UNet(object):
                     feed_dict={self.images: images})
         return mask
 
-def spatial_softmax(features, name=None):
-    """Computes the spatial softmax of a convolutional feature map.
-
-    modified from 
-    https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/layers/python/layers/layers.py
-
-    Args:
-    features: A `Tensor` of size [batch_size, H, W, C]; the
-      convolutional feature map.
-    temperature: Softmax temperature (optional). If None, a learnable
-      temperature is created.
-    name: A name for this operation (optional).
-    variables_collections: Collections for the temperature variable.
-    trainable: If `True` also add variables to the graph collection
-      `GraphKeys.TRAINABLE_VARIABLES` (see `tf.Variable`).
-    data_format: A string. `NHWC` (default) and `NCHW` are supported.
-    Returns:
-    feature_keypoints: A `Tensor` with size [batch_size, num_channels, 2];
-      the expected 2D locations of each channel's feature keypoint in
-      normalized pixel coordinates. The last two dims are arranged as 
-      [[x1, y1], [x1, y2], ..., [xC, yC]]
-    Raises:
-    ValueError: If num_channels dimension is unspecified.
-    """
-    with tf.variable_scope(name, 'spatial_softmax'):
-        shape = tf.shape(features)
-        static_shape = features.shape
-        height, width, num_channels = shape[1], shape[2], static_shape[3]
-
-    with tf.name_scope('spatial_softmax_op', 'spatial_softmax_op', [features]):
-        # Create tensors for x and y coordinate values
-
-        pos_x, pos_y = meshgrid1(width, height)
-        features = tf.reshape(features, [-1, height * width, num_channels])
-        softmax_attention = tf.nn.softmax(features, axis=1)
-
-        expected_x = tf.reduce_sum(
-                tf.expand_dims(pos_x, -1) * softmax_attention, [1], keepdims=True)
-        expected_y = tf.reduce_sum(
-                tf.expand_dims(pos_y, -1) * softmax_attention, [1], keepdims=True)
-        expected_xy = tf.concat([expected_x, expected_y], 1)
-        feature_keypoints = tf.reshape(expected_xy,
-                [-1, num_channels.value, 2])
-
-        return feature_keypoints, \
-            tf.reshape(softmax_attention, [-1, height, width, num_channels])
 
 def distort(images, d, to_fisheye=True, name='distort'):
     def _repeat(x, n_repeats):
@@ -237,7 +191,7 @@ def display_trainable_parameters():
 
     print("\n\nTrainable Parameters: %d\n\n" % total_parameters)
 
-def mask_helper(im, pred, mask, title, bbox=None):
+def mask_helper(im, pred, mask, title):
     h, w = pred.shape[:2]
     rgb1 = np.zeros((h, w, 3))
     rgb2 = np.zeros((h, w, 3))
@@ -261,12 +215,6 @@ def mask_helper(im, pred, mask, title, bbox=None):
 
     image1 = 0.3 * im + 0.7 * rgb1
     image2 = 0.3 * im + 0.7 * rgb2
-
-    if bbox is not None:
-        print(bbox)
-        cv2.rectangle(image2, (int(bbox[0]), int(bbox[1])), 
-                (int(bbox[0]+bbox[2]), int(bbox[1]+bbox[3])), 
-                (1.0, 0, 0), 2)
 
     global preddata
     global gtdata
@@ -332,7 +280,6 @@ class TrainingHook(tf.train.SessionRunHook):
             "im": graph.get_collection("im")[0],
             "pred": graph.get_collection("pred")[0],
             "label": graph.get_collection("label")[0],
-            "bbox": graph.get_collection("bbox")[0],
         }
 
         return tf.train.SessionRunArgs(runargs)
@@ -360,17 +307,8 @@ class TrainingHook(tf.train.SessionRunHook):
             im = run_values.results["im"] / 255.0
             pred = run_values.results["pred"] 
             mask = run_values.results["label"] 
-            bbox = run_values.results["bbox"] 
 
-            # now done inside unet function
-            '''
-            bbox_loc = np.argmax(bbox_mask.reshape(-1))
-            y, x = np.unravel_index(bbox_loc, bbox_mask.shape)
-            w, h = bbox_wh[y, x]
-            # convert to opencv bbox
-            bbox = (x - w/2, y - h/2, w, h)
-            '''
-            mask_helper(im, pred, mask, "Train", bbox)
+            mask_helper(im, pred, mask, "Train")
             tp = (step,
                   self.steps,
                   time.strftime("%a %d %H:%M:%S", time.localtime(time.time() + eta_time)),
@@ -461,7 +399,6 @@ def standard_model_fn(func, steps, run_config,
         tf.add_to_collection("im", ret["im"])
         tf.add_to_collection("pred", ret["pred"])
         tf.add_to_collection("label", ret["label"])
-        tf.add_to_collection("bbox", ret["bbox"])
         
         train_op = None
 
@@ -506,7 +443,7 @@ def train_and_eval(model_dir,
     input_fn,
     hparams,
     log_steps=32,
-    save_steps=2500,
+    save_steps=128,
     summary_steps=128,
     eval_start_delay_secs=600,
     eval_throttle_secs=0):

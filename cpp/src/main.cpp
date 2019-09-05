@@ -35,12 +35,11 @@ int main(int argc, char* argv[])
         }
         */
         t0 = clock();
-        cv::Rect bbox = unet.run(im, mask)[0];
+        unet.run(im, mask);
         printf("Inference took %f ms\n", 1000 * (double)(clock()-t0) / CLOCKS_PER_SEC);
         
         cv::Mat im2;
         cv::resize(im[0], im[0], cv::Size(320, 240));
-        cv::rectangle(im[0], bbox, 0, 2);
         cv::cvtColor(im[0], im[0], cv::COLOR_BGR2GRAY);
         cv::hconcat(im[0], 255 * mask[0], im2);
         cv::imshow("Display window", im2);

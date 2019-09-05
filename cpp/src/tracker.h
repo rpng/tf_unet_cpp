@@ -27,13 +27,13 @@ double lastTimeStep = 0;
 // Number of seconds that if passed, means we lost the track
 double dt_threshold = 5.0;
 
-// Most of this code has been taken from this blog post here:
+// All this code has been taken from this blog post here:
 // https://www.myzhar.com/blog/tutorials/tutorial-opencv-ball-tracker-using-kalman-filter/
-void initialize_kf() {
+void initialize_kf(bool do_stereo) {
 
     // set our state size
-    stateSize = 6;
-    measSize = 8; // 8 bc we get bbox meas from mask and net
+    stateSize = do_stereo ? 12 : 6;
+    measSize = do_stereo ? 8 : 4;
     contrSize = 0;
 
 
@@ -55,16 +55,11 @@ void initialize_kf() {
     // [ 0 0 0  0  0 1 ]
 
 
-    // Measure Matrix H (8 x 6)
+    // Measure Matrix H
     // [ 1 0 0 0 0 0 ]
     // [ 0 1 0 0 0 0 ]
     // [ 0 0 0 0 1 0 ]
     // [ 0 0 0 0 0 1 ]
-    // [ 1 0 0 0 0 0 ]
-    // [ 0 1 0 0 0 0 ]
-    // [ 0 0 0 0 1 0 ]
-    // [ 0 0 0 0 0 1 ]
-
 
 
     // Process Noise Covariance Matrix Q
@@ -75,23 +70,19 @@ void initialize_kf() {
     // [ 0    0   0     0     Ew   0  ]
     // [ 0    0   0     0     0    Eh ]
 
-    kf = cv::KalmanFilter(stateSize, measSize, 0, CV_32F);
+    kf = cv::KalmanFilter(6, 4, 0, CV_32F);
 
-    state = cv::Mat(stateSize, 1, CV_32F);  // [x, y, v_x, v_y, w, h]
+    state = cv::Mat(stateSize, 1, CV_32F);  // [x,y,v_x,v_y,w,h]
     meas = cv::Mat(measSize, 1, CV_32F);
     lastTimeStep = 0;
 
     cv::setIdentity(kf.transitionMatrix);
 
     kf.measurementMatrix = cv::Mat::zeros(measSize, stateSize, CV_32F);
-    kf.measurementMatrix.at<float>(0 * 6 + 0) = 1.0f;
-    kf.measurementMatrix.at<float>(1 * 6 + 1) = 1.0f;
-    kf.measurementMatrix.at<float>(2 * 6 + 4) = 1.0f;
-    kf.measurementMatrix.at<float>(3 * 6 + 5) = 1.0f;
-    kf.measurementMatrix.at<float>(4 * 6 + 0) = 1.0f;
-    kf.measurementMatrix.at<float>(5 * 6 + 1) = 1.0f;
-    kf.measurementMatrix.at<float>(6 * 6 + 4) = 1.0f;
-    kf.measurementMatrix.at<float>(7 * 6 + 5) = 1.0f;
+    kf.measurementMatrix.at<float>(0) = 1.0f;
+    kf.measurementMatrix.at<float>(7) = 1.0f;
+    kf.measurementMatrix.at<float>(16) = 1.0f;
+    kf.measurementMatrix.at<float>(23) = 1.0f;
 
     //cv::setIdentity(kf.processNoiseCov, cv::Scalar(1e-2));
     // kf.processNoiseCov.at<float>(0) = 1.0f;
@@ -108,18 +99,8 @@ void initialize_kf() {
     kf.processNoiseCov.at<float>(35) = 1e-1;
 
     // Measures Noise Covariance Matrix R
-    
-    // From the net (raw)
-    kf.measurementNoiseCov.at<float>(0 * 8 + 0) = 1000.0f;
-    kf.measurementNoiseCov.at<float>(1 * 8 + 1) = 1000.0f;
-    kf.measurementNoiseCov.at<float>(2 * 8 + 2) = 1000.0f;
-    kf.measurementNoiseCov.at<float>(3 * 8 + 3) = 1000.0f;
-
-    // From the mask
-    kf.measurementNoiseCov.at<float>(4 * 8 + 4) = 1000.0f;
-    kf.measurementNoiseCov.at<float>(5 * 8 + 5) = 1000.0f;
-    kf.measurementNoiseCov.at<float>(6 * 8 + 6) = 1000.0f;
-    kf.measurementNoiseCov.at<float>(7 * 8 + 7) = 1000.0f;
+    // cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(1));
+    cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(10));
 
 }
 
@@ -127,10 +108,7 @@ void initialize_kf() {
 
 // This will update the kalman filter given a new observation
 // If we have lost track of it, then we should re-init the filter
-//
-// measBB should be of length 2, probably allocated on the stack
-bool update_kf(double newTimeStep, const cv::Rect *measBB, cv::Rect& upRect) {
-
+bool update_kf(double newTimeStep, cv::Rect& measBB, cv::Rect& upRect) {
 
     // Calculate delta time
     double dTd = newTimeStep - lastTimeStep;
@@ -149,15 +127,10 @@ bool update_kf(double newTimeStep, const cv::Rect *measBB, cv::Rect& upRect) {
 
     // <<<<< Noise smoothing
     // <<<<< Detection result
-    meas.at<float>(0) = measBB[0].x + measBB[0].width / 2;
-    meas.at<float>(1) = measBB[0].y + measBB[0].height / 2;
-    meas.at<float>(2) = (float) measBB[0].width;
-    meas.at<float>(3) = (float) measBB[0].height;
-
-    meas.at<float>(4) = measBB[1].x + measBB[1].width / 2;
-    meas.at<float>(5) = measBB[1].y + measBB[1].height / 2;
-    meas.at<float>(6) = (float) measBB[1].width;
-    meas.at<float>(7) = (float) measBB[1].height;
+    meas.at<float>(0) = measBB.x + measBB.width / 2;
+    meas.at<float>(1) = measBB.y + measBB.height / 2;
+    meas.at<float>(2) = (float) measBB.width;
+    meas.at<float>(3) = (float) measBB.height;
 
     // Track if we did an update or not
     bool did_update = false;
@@ -194,8 +167,7 @@ bool update_kf(double newTimeStep, const cv::Rect *measBB, cv::Rect& upRect) {
         // std::cout << "kf error = " << err << std::endl;
 
         // calc state covariance if this measurement is to be included
-        cv::Mat S = kf.measurementMatrix * kf.errorCovPre * 
-                     kf.measurementMatrix.t() + kf.measurementNoiseCov;
+        cv::Mat S = kf.measurementMatrix*kf.errorCovPre*kf.measurementMatrix.t() + kf.measurementNoiseCov;
         cv::Mat S_inv = S.inv();
 
         // calc Mahalanobis distance
@@ -203,7 +175,7 @@ bool update_kf(double newTimeStep, const cv::Rect *measBB, cv::Rect& upRect) {
         // std::cout << "kf error = " << err << std::endl;
         std::cout << "chi2 = " << chi.at<float>(0) << std::endl;
 
-        if(chi.at<float>(0) < 6.66) {
+        if(chi.at<float>(0) < 200) {
             kf.correct(meas);
             lastTimeStep = newTimeStep;
             did_update = true;
