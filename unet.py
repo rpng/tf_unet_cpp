@@ -21,7 +21,7 @@ vw = 320
 
 FLAGS = tf.app.flags.FLAGS
 if __name__ == '__main__':
-    tf.app.flags.DEFINE_string("mode", "train", "train or predict")
+    tf.app.flags.DEFINE_string("mode", "train", "train or test")
 
     tf.app.flags.DEFINE_string("model_dir", "model", "Estimator model_dir")
 
@@ -255,41 +255,72 @@ def main(argv):
             steps=FLAGS.steps,
             batch_size=FLAGS.batch_size,
        )
-    elif FLAGS.mode == 'predict':
+    elif FLAGS.mode == 'test':
         import cv2
 
         with tf.Session() as sess:
             model = utils.UNet(FLAGS.model_dir, sess)
             dset_it = create_input_fn('test', 1)().make_one_shot_iterator()
             __dset = dset_it.get_next()
+
+            # See https://www.jeremyjordan.me/evaluating-image-segmentation-models/
+            iou = 0.0
+            acc_num = 0.0
+            acc_denom = 0.0
+
+            j = 0
             try:
-                j = 0
                 if not os.path.isdir('plots'):
                     os.mkdir('plots')
+                    
                 while 1:
                     print("Working on sample %d" % j)
                     dset = sess.run(__dset)
                     lab = dset['label']
                     im = dset['img']
                     im = cv2.resize(np.squeeze(im), (vw, vh))
+                    #t0 = time()
                     mask = model.run(im)
+                    #print((time() - t0) * 1000)
                     mask = np.squeeze(mask)
                     lab = np.squeeze(lab)
                     lab = np.argmax(cv2.resize(lab, (vw, vh)), axis=2)
-                    rgb_mask = np.zeros((vh, vw, 3))
-                    rgb_lab = np.zeros((vh, vw, 3))
-                    d = 'plots/%d' % j
+                    
+                    assert max(np.max(lab), np.max(mask)) <= 1 
+                    
+                    intersect = np.logical_and(mask, lab)
+                    union = np.logical_or(mask, lab)
+                    iou += np.sum(intersect) / np.sum(union)
+                    
+                    tp_mat = np.logical_and(mask == 1, lab == 1)
+                    tp = np.sum(tp_mat)
+                    tn = np.sum(np.logical_and(mask == 0, lab == 0))
+                    fp_mat = np.logical_and(mask == 1, lab == 0)
+                    fp = np.sum(fp_mat)
+                    fn_mat = np.logical_and(mask == 0, lab == 1)
+                    fn = np.sum(fn_mat)
+                    acc_num += tp + tn
+                    acc_denom += tp + tn + fp + fn
+
+                    bgr_tp = np.zeros((vh, vw, 3))
+                    bgr_tp[tp_mat] = [0., 1., 0.]
+                    bgr_fp = np.zeros((vh, vw, 3))
+                    bgr_fp[fp_mat] = [1., 51./255, 51./255]
+                    bgr_fn = np.zeros((vh, vw, 3))
+                    bgr_fn[fn_mat] = [0., 0., 1.]
+
+                    alpha_mask = np.logical_or(np.logical_or(tp_mat, fp_mat), fn_mat)
+                    #not_alpha_mask = np.logical_not(alpha_mask)
+                    im[alpha_mask] = .25 * im[alpha_mask]
+                    im += 0.25 * (bgr_tp + bgr_fp + bgr_fn)
+                    #alpha_mask_fig = im[...,np.newaxis]
+                    fl = 'plots/%d.png' % j
+                    cv2.imwrite(fl, (255*im).astype(np.uint8))
                     j += 1
-                    if not os.path.isdir(d):
-                        os.mkdir(d)
-                    for i in range(2):
-                        c = np.array([0,0,0] if i==0 else [1,0,0])
-                        rgb_mask[mask==i, :] = c
-                        rgb_lab[lab==i, :] = c
-                    for fn, t in [('im', im), ('mask', rgb_mask), ('lab', rgb_lab)]:
-                        cv2.imwrite(os.path.join(d, fn) + '.jpg', np.uint8(255*t))
             except tf.errors.OutOfRangeError:
                 print("Done")
+                print("IOU =", iou / j) 
+                print("accuracy =", acc_num / acc_denom) 
     else:
         raise ValueError("Unknown mode: %s" % FLAGS.mode)
 
