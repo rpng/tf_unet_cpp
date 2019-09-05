@@ -17,7 +17,7 @@ from tensorflow.python.client import device_lib
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
 
-#from unet import vh, vw, unet
+from unet import vh, vw, unet
 
 import time
 import traceback

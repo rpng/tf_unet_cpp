@@ -56,8 +56,12 @@ def create_input_fn(split, batch_size):
         """input_fn for tf.estimator.Estimator."""
         
         indir = FLAGS.input_dir
-        #tfrecord = 'train_data*.tfrecord' if split=='train' else 'validation_data.tfrecord'
-        tfrecord = 'validation_data.tfrecord'
+        if split == 'train':
+            tfrecord = 'train_data*.tfrecord'
+        elif split == 'val':
+            tfrecord = 'validation_data.tfrecord'
+        else:
+            tfrecord = 'test_data.tfrecord'
 
         def parser(serialized_example):
 
@@ -254,14 +258,9 @@ def main(argv):
     elif FLAGS.mode == 'predict':
         import cv2
 
-        tf.reset_default_graph()
-        with tf.gfile.GFile('cpp/unet.pb', 'rb') as f:
-            gd = tf.GraphDef()
-            gd.ParseFromString(f.read())
-        g = tf.Graph()
-        with tf.Session(graph=g) as sess:
-            im_t, mask_t = tf.import_graph_def(gd, return_elements=['UNet/images:0', 'UNet/mask:0'])
-            dset_it = create_input_fn('val', 1)().make_one_shot_iterator()
+        with tf.Session() as sess:
+            model = utils.UNet(FLAGS.model_dir, sess)
+            dset_it = create_input_fn('test', 1)().make_one_shot_iterator()
             __dset = dset_it.get_next()
             try:
                 j = 0
@@ -273,8 +272,7 @@ def main(argv):
                     lab = dset['label']
                     im = dset['img']
                     im = cv2.resize(np.squeeze(im), (vw, vh))
-                    mask = sess.run(mask_t, 
-                            feed_dict={im_t:im[np.newaxis,...]})
+                    mask = model.run(im)
                     mask = np.squeeze(mask)
                     lab = np.squeeze(lab)
                     lab = np.argmax(cv2.resize(lab, (vw, vh)), axis=2)

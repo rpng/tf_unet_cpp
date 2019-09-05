@@ -20,7 +20,8 @@ FLAGS = tf.app.flags.FLAGS
 if __name__ == '__main__':
    
     tf.app.flags.DEFINE_string("output_dir", "tfrecords/", "")
-    tf.app.flags.DEFINE_string("arl_root", "/home/rpng/datasets/ARL/labelbox", "")
+    tf.app.flags.DEFINE_string("arl_root", "/mnt/f3be6b3c-80bb-492a-98bf-4d0d674a51d6/ARL/labelbox",\
+            "")
     tf.app.flags.DEFINE_integer("num_files", 2, "Num files to write for train dataset. More files=better randomness")
     tf.app.flags.DEFINE_boolean("debug", False, "")
     tf.app.flags.DEFINE_boolean("wheels", False, "")
@@ -65,78 +66,85 @@ def generate():
                 tf.python_io.TFRecordWriter(FLAGS.output_dir + "train_data%d.tfrecord" % ii))
     val_writer = None if FLAGS.debug else \
             tf.python_io.TFRecordWriter(FLAGS.output_dir + "validation_data.tfrecord")
+    test_writer = None if FLAGS.debug else \
+            tf.python_io.TFRecordWriter(FLAGS.output_dir + "test_data.tfrecord")
     mean = np.zeros((3))
     im_list, lab_list = writeFileList(FLAGS.arl_root)
+    test_im_list, test_lab_list = writeFileList(FLAGS.arl_root + "_test_dset")
     count = 0
-    for i in range(len(im_list)):
-        im_fl = im_list[i]
-        lab_fls = lab_list[i]
+    for j in range(2):
+        for i in range(len(im_list if j==0 else test_im_list)):
+            im_fl = im_list[i] if j==0 else test_im_list[i]
+            lab_fls = lab_list[i] if j==0 else test_lab_list[i]
 
-        print("Working on sample %d" % i)
+            print("Working on sample %d" % i)
 
-        image = cv2.imread(im_fl)
-        if FLAGS.wheels:
-            lab = np.logical_or(cv2.imread(lab_fls[0], 
-                cv2.IMREAD_GRAYSCALE)[..., np.newaxis],
-                cv2.imread(lab_fls[1], 
-                cv2.IMREAD_GRAYSCALE)[..., np.newaxis])
-        else:
-            lab = cv2.imread(lab_fls[0], 
-                cv2.IMREAD_GRAYSCALE)[..., np.newaxis]
-
-        mask_label = np.zeros((vh, vw, 2), dtype=np.bool)
-        mask_label[:, :, 1:2] = lab
-        if np.any(mask_label[:,:,1]):
-            mean += np.mean(image / 255.0, axis=(0,1))
-            mask_label[:, :, 0] = np.logical_not(mask_label[:, :, 1])
-            if FLAGS.debug:
-                mask = np.argmax(mask_label, axis=-1)
-                rgb = np.zeros((vh, vw, 3))
-
-                legend = []
-                np.random.seed(0)
-                for i in range(2):
-                    c = np.random.rand(3)
-                    case = mask==i
-                    if np.any(case):
-                        legend.append(Patch(facecolor=tuple(c), edgecolor=tuple(c),
-                                    label='background' if i==0 else 'car'))
-
-                    rgb[case, :] = c
-                
-                _image = cv2.resize(image, (vw, vh)) / 255.0
-
-                _image = 0.3 * _image + 0.7 * rgb
-
-                global imdata
-                if imdata is None:
-                    imdata = plt.imshow(_image)
-                    f = plt.gca()
-                    f.axes.get_xaxis().set_ticks([])
-                    f.axes.get_yaxis().set_ticks([])
-                else:
-                    imdata.set_data(_image)
-
-                lgd = plt.legend(handles=legend, loc='upper left', bbox_to_anchor=(1.0, 1))
-                
-                plt.pause(1e-9)
-                plt.draw()
-                plt.pause(3)
-
+            image = cv2.imread(im_fl)
+            if FLAGS.wheels:
+                lab = np.logical_or(cv2.imread(lab_fls[0], 
+                    cv2.IMREAD_GRAYSCALE)[..., np.newaxis],
+                    cv2.imread(lab_fls[1], 
+                    cv2.IMREAD_GRAYSCALE)[..., np.newaxis])
             else:
-                features_ = {
-                    'img': bytes_feature(tf.compat.as_bytes(image.tostring())),
-                    'label': bytes_feature(tf.compat.as_bytes(mask_label.astype(np.uint8).tostring()))
-                }
-                example = tf.train.Example(features=tf.train.Features(feature=features_))
+                lab = cv2.imread(lab_fls[0], 
+                    cv2.IMREAD_GRAYSCALE)[..., np.newaxis]
 
-                if np.random.randint(0,100) < val_split:
-                    val_writer.write(example.SerializeToString())
+            mask_label = np.zeros((vh, vw, 2), dtype=np.bool)
+            mask_label[:, :, 1:2] = lab
+            if np.any(mask_label[:,:,1]):
+                if j == 0: # only for train/val
+                    mean += np.mean(image / 255.0, axis=(0,1))
+                mask_label[:, :, 0] = np.logical_not(mask_label[:, :, 1])
+                if FLAGS.debug:
+                    mask = np.argmax(mask_label, axis=-1)
+                    rgb = np.zeros((vh, vw, 3))
+
+                    legend = []
+                    np.random.seed(0)
+                    for i in range(2):
+                        c = np.random.rand(3)
+                        case = mask==i
+                        if np.any(case):
+                            legend.append(Patch(facecolor=tuple(c), edgecolor=tuple(c),
+                                        label='background' if i==0 else 'car'))
+
+                        rgb[case, :] = c
+                    
+                    _image = cv2.resize(image, (vw, vh)) / 255.0
+
+                    _image = 0.3 * _image + 0.7 * rgb
+
+                    global imdata
+                    if imdata is None:
+                        imdata = plt.imshow(_image)
+                        f = plt.gca()
+                        f.axes.get_xaxis().set_ticks([])
+                        f.axes.get_yaxis().set_ticks([])
+                    else:
+                        imdata.set_data(_image)
+
+                    lgd = plt.legend(handles=legend, loc='upper left', bbox_to_anchor=(1.0, 1))
+                    
+                    plt.pause(1e-9)
+                    plt.draw()
+                    plt.pause(3)
+
                 else:
-                    train_writers[np.random.randint(0,FLAGS.num_files)].write(example.SerializeToString())
-            count += 1
-        else:
-            print("No cars. Skipping")
+                    features_ = {
+                        'img': bytes_feature(tf.compat.as_bytes(image.tostring())),
+                        'label': bytes_feature(tf.compat.as_bytes(mask_label.astype(np.uint8).tostring()))
+                    }
+                    example = tf.train.Example(features=tf.train.Features(feature=features_))
+
+                    if j == 1:
+                        test_writer.write(example.SerializeToString())
+                    elif np.random.randint(0,100) < val_split:
+                        val_writer.write(example.SerializeToString())
+                    else:
+                        train_writers[np.random.randint(0,FLAGS.num_files)].write(example.SerializeToString())
+                count += 1
+            else:
+                print("No cars. Skipping")
     with open('mean.txt', 'w') as f:
         s = ''
         mean = mean / count
